@@ -1,4 +1,4 @@
-# 🐳 AWS Local Environment
+# 🐳 localcloud — AWS Local Development Environment
 
 A complete local environment that replicates the main AWS services using Docker and persistent volumes. Designed for development and learning — no AWS account required.
 
@@ -31,34 +31,61 @@ A complete local environment that replicates the main AWS services using Docker 
 
 ## 🚀 Quick Start
 
-### 1. Set up environment variables
+### 1. Clone the repository
 ```bash
-cp .env.example .env
-# Edit .env with your preferred values if needed
+git clone https://github.com/your-user/localcloud.git
+cd localcloud
 ```
 
-### 2. Start all services
+### 2. Run the setup script (first time only)
+
+> ⚠️ **Required before your first `docker compose up`.**
+> This script creates all necessary config files and directories.
+> Skipping it may cause Docker to auto-create directories instead
+> of files, resulting in mount errors on startup.
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+The script will:
+- Create all required `config/` files and directories
+- Auto-fix any directories that were incorrectly created by Docker in previous runs
+- Run a pre-flight check to confirm everything is in order
+- Copy `.env.example` → `.env` if no `.env` exists yet
+
+### 3. Configure AWS CLI local profile (once)
+```bash
+aws configure set aws_access_key_id test --profile localstack
+aws configure set aws_secret_access_key test --profile localstack
+aws configure set region us-east-1 --profile localstack
+aws configure set output json --profile localstack
+aws configure set endpoint_url http://localhost:4566 --profile localstack
+```
+
+### 4. Start all services
 ```bash
 docker compose up -d
 ```
 
-### 3. Check service status
+### 5. Check service status
 ```bash
 docker compose ps
 ```
 
-### 4. Follow logs for a specific service
+### 6. Follow logs for a specific service
 ```bash
 docker compose logs -f localstack
 docker compose logs -f postgres
 ```
 
-### 5. Stop all services
+### 7. Stop all services
 ```bash
 docker compose down
 ```
 
-### 6. Stop and remove all data volumes
+### 8. Stop and remove all data volumes
 ```bash
 docker compose down -v
 ```
@@ -70,8 +97,9 @@ docker compose down -v
 ```
 .
 ├── docker-compose.yml          # Main stack definition
-├── .env                        # Active environment variables
-├── .env.example                # Template for environment variables
+├── setup.sh                    # Pre-flight setup script (run before first up)
+├── .env                        # Active environment variables (git-ignored)
+├── .env.example                # Template — commit this, not .env
 └── config/
     ├── elasticmq.conf          # SQS queue definitions
     ├── nginx/
@@ -196,39 +224,64 @@ curl http://localhost:8200/v1/secret/data/my-secret \
 
 ---
 
-## ⚙️ Configure AWS CLI Profile
+## 🛠️ Troubleshooting
 
-Run these commands once to set up a local AWS CLI profile pointing to LocalStack:
+### "mount ... not a directory" error on startup
+
+This happens when Docker auto-creates a **directory** instead of a file for a config volume mount. Fix it by running the setup script, which detects and repairs this automatically:
 
 ```bash
-aws configure set aws_access_key_id test --profile localstack
-aws configure set aws_secret_access_key test --profile localstack
-aws configure set region us-east-1 --profile localstack
-aws configure set output json --profile localstack
-aws configure set endpoint_url http://localhost:4566 --profile localstack
+./setup.sh
 ```
 
-Then use `--profile localstack` with any `aws` CLI command.
+To fix it manually for a specific file:
+```bash
+# Example for Prometheus
+rm -rf config/prometheus/prometheus.yml
+./setup.sh
+docker compose up -d prometheus
+```
+
+### A container keeps restarting
+```bash
+docker compose logs -f <service-name>
+```
+
+### Keycloak fails to start
+Keycloak depends on PostgreSQL. Wait 30 seconds after `docker compose up` and retry:
+```bash
+docker compose restart keycloak
+```
+
+### Out of memory
+Comment out `opensearch` and `kafka` in `docker-compose.yml`. They are the two heaviest services. A minimum of 8 GB RAM is recommended for the full stack.
+
+### AWS CLI returns an error
+Make sure you append `--profile localstack` to every command, and verify LocalStack is healthy:
+```bash
+curl http://localhost:4566/_localstack/health | python3 -m json.tool
+```
 
 ---
 
 ## 📋 Requirements
 
-| Requirement       | Minimum Version |
-|-------------------|-----------------|
-| Docker            | >= 24.0         |
-| Docker Compose    | >= 2.0          |
-| RAM               | 8 GB (recommended) |
-| Disk space        | 10 GB           |
-
-> **Tip:** If your machine has less than 8 GB of available RAM, comment out the heavier services (Kafka, OpenSearch) in `docker-compose.yml` to reduce memory usage.
+| Requirement    | Minimum        |
+|----------------|----------------|
+| Docker         | >= 24.0        |
+| Docker Compose | >= 2.0         |
+| RAM            | 8 GB recommended |
+| Disk space     | 10 GB          |
 
 ---
 
 ## ⚠️ Important Notes
 
-- All data is persisted in named Docker volumes and survives container restarts.
-- All credentials are fake and only valid for local development.
-- Some services (Keycloak, OpenSearch) may take 30–60 seconds to become fully ready after startup.
+- Run `./setup.sh` **before** your first `docker compose up` to avoid mount errors.
+- All data persists in named Docker volumes and survives container restarts.
+- `docker compose down` removes containers but **keeps volumes** (data is safe).
+- `docker compose down -v` removes containers **and volumes** (all data is lost).
+- All credentials are dummy values — safe for local development only.
+- Some services (Keycloak, OpenSearch) may take 30–60 seconds to be fully ready.
+- Add `.env` to `.gitignore`. Only commit `.env.example`.
 - Never use these configurations in a production environment.
-- The `.env` file should be added to `.gitignore`. Only commit `.env.example`.

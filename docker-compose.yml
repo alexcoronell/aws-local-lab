@@ -141,7 +141,7 @@ services:
       - "9324:9324"
       - "9325:9325"
     volumes:
-      - ./config/elasticmq.conf:/opt/elasticmq.conf
+      - ./config/elasticmq.conf:/opt/elasticmq.conf:ro
     networks:
       - aws_local_network
 
@@ -345,6 +345,9 @@ services:
   # ============================================================
   # 📉 Prometheus — Metrics backend for Grafana
   # UI: http://localhost:9090
+  # FIX: Mounts the config/ directory (not the .yml file directly)
+  # to prevent Docker creating a directory instead of a file,
+  # which causes: "mount ... not a directory" error on startup.
   # ============================================================
   prometheus:
     image: prom/prometheus:latest
@@ -353,7 +356,7 @@ services:
       - "9090:9090"
     volumes:
       - prometheus_data:/prometheus
-      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/prometheus:/etc/prometheus:ro
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
