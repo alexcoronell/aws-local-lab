@@ -1,0 +1,26 @@
+# =============================================================
+# Prometheus Configuration
+# Scrapes metrics from local AWS-equivalent services
+# =============================================================
+
+global:
+  # How frequently to scrape targets
+  scrape_interval: 15s
+  # How frequently to evaluate rules
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Redis metrics (ElastiCache equivalent)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+
+  # PostgreSQL metrics (RDS equivalent)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']

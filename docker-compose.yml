@@ -1,0 +1,484 @@
+version: '3.8'
+
+# =============================================================
+# 🐳 AWS LOCAL ENVIRONMENT — Full Docker Compose Stack
+# Local equivalents of the main AWS services
+# ⚠️  For development only. DO NOT use in production.
+# =============================================================
+
+services:
+
+  # ============================================================
+  # 📦 MinIO — AWS S3 Equivalent
+  # Web Console: http://localhost:9001
+  # API Endpoint: http://localhost:9000
+  # ============================================================
+  minio:
+    image: minio/minio:latest
+    container_name: aws_local_s3
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+      MINIO_DEFAULT_BUCKETS: my-bucket,logs-bucket,assets-bucket
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🗃️  DynamoDB Local — AWS DynamoDB Equivalent (OFFICIAL IMAGE)
+  # Endpoint: http://localhost:8000
+  # ============================================================
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: aws_local_dynamodb
+    ports:
+      - "8000:8000"
+    volumes:
+      - dynamodb_data:/home/dynamodblocal
+    command: -jar DynamoDBLocal.jar -sharedDb -dbPath /home/dynamodblocal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/shell/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🐘 PostgreSQL — AWS RDS PostgreSQL / Aurora Equivalent
+  # Host: localhost:5432
+  # ============================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: aws_local_rds_postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init/postgres:/docker-entrypoint-initdb.d
+    environment:
+      POSTGRES_DB: maindb
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_MULTIPLE_DATABASES: maindb,analyticsdb,authdb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d maindb"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🐬 MySQL — AWS RDS MySQL Equivalent
+  # Host: localhost:3306
+  # ============================================================
+  mysql:
+    image: mysql:8.0
+    container_name: aws_local_rds_mysql
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword123
+      MYSQL_DATABASE: maindb
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: password123
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "admin", "-ppassword123"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🔴 Redis — AWS ElastiCache (Redis) Equivalent
+  # Host: localhost:6379
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: aws_local_elasticache_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --requirepass password123
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "password123", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 📨 ElasticMQ — AWS SQS Equivalent
+  # API: http://localhost:9324
+  # UI:  http://localhost:9325
+  # ============================================================
+  elasticmq:
+    image: softwaremill/elasticmq-native:latest
+    container_name: aws_local_sqs
+    ports:
+      - "9324:9324"
+      - "9325:9325"
+    volumes:
+      - ./config/elasticmq.conf:/opt/elasticmq.conf
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 📬 Mailhog — AWS SES (Simple Email Service) Equivalent
+  # SMTP: localhost:1025
+  # UI:   http://localhost:8025
+  # ============================================================
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: aws_local_ses
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🔍 OpenSearch — AWS OpenSearch Service Equivalent
+  # API: http://localhost:9200
+  # ============================================================
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: aws_local_opensearch
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 📊 OpenSearch Dashboards — AWS OpenSearch Dashboards Equivalent
+  # UI: http://localhost:5601
+  # ============================================================
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.11.0
+    container_name: aws_local_opensearch_dashboards
+    ports:
+      - "5601:5601"
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+    depends_on:
+      - opensearch
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🔐 Keycloak — AWS Cognito Equivalent
+  # UI: http://localhost:8080
+  # Admin credentials: admin / password123
+  # ============================================================
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: aws_local_cognito
+    ports:
+      - "8080:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: password123
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/authdb
+      KC_DB_USERNAME: admin
+      KC_DB_PASSWORD: password123
+    command: start-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🌊 Zookeeper — Required by Kafka
+  # ============================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: aws_local_zookeeper
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🌊 Kafka — AWS Kinesis / MSK Equivalent
+  # Broker: localhost:9092
+  # ============================================================
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: aws_local_kinesis_kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      - zookeeper
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🖥️  Kafka UI — Kafka Management Dashboard
+  # UI: http://localhost:8090
+  # ============================================================
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: aws_local_kafka_ui
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    depends_on:
+      - kafka
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # ⚡ LocalStack — Lambda, Step Functions, IAM, SNS, EventBridge
+  # API: http://localhost:4566
+  # ============================================================
+  localstack:
+    image: localstack/localstack:latest
+    container_name: aws_local_localstack
+    ports:
+      - "4566:4566"
+      - "4510-4559:4510-4559"
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - SERVICES=lambda,stepfunctions,iam,sns,eventbridge,cloudwatch,secretsmanager,ssm,apigateway
+      - DEFAULT_REGION=us-east-1
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - LAMBDA_EXECUTOR=docker
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DEBUG=0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 📈 Grafana — AWS CloudWatch Dashboards Equivalent
+  # UI: http://localhost:3000
+  # Admin credentials: admin / password123
+  # ============================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aws_local_cloudwatch_grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: password123
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    depends_on:
+      - prometheus
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 📉 Prometheus — Metrics backend for Grafana
+  # UI: http://localhost:9090
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aws_local_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🔑 Vault — AWS Secrets Manager / KMS Equivalent
+  # UI:    http://localhost:8200
+  # Token: root-token
+  # ============================================================
+  vault:
+    image: hashicorp/vault:latest
+    container_name: aws_local_secrets_manager
+    ports:
+      - "8200:8200"
+    volumes:
+      - vault_data:/vault/data
+      - ./config/vault:/vault/config
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      VAULT_ADDR: http://0.0.0.0:8200
+    command: server -dev
+    cap_add:
+      - IPC_LOCK
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🌐 Nginx — AWS API Gateway / CloudFront Equivalent
+  # HTTP:  http://localhost:80
+  # HTTPS: https://localhost:443
+  # ============================================================
+  nginx:
+    image: nginx:alpine
+    container_name: aws_local_api_gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/certs:/etc/nginx/certs:ro
+      - nginx_logs:/var/log/nginx
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🗺️  Consul — AWS Service Discovery / Route 53 Equivalent
+  # UI: http://localhost:8500
+  # ============================================================
+  consul:
+    image: hashicorp/consul:latest
+    container_name: aws_local_service_discovery
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    volumes:
+      - consul_data:/consul/data
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0
+    networks:
+      - aws_local_network
+
+  # ============================================================
+  # 🖥️  Portainer — Docker Management UI
+  # UI: https://localhost:9443
+  # ============================================================
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: aws_local_portainer
+    ports:
+      - "9443:9443"
+      - "9002:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - aws_local_network
+
+# =============================================================
+# 💾 VOLUMES — Data persistence across container restarts
+# =============================================================
+volumes:
+  minio_data:
+    driver: local
+  dynamodb_data:
+    driver: local
+  postgres_data:
+    driver: local
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  opensearch_data:
+    driver: local
+  keycloak_data:
+    driver: local
+  kafka_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_logs:
+    driver: local
+  localstack_data:
+    driver: local
+  grafana_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  vault_data:
+    driver: local
+  nginx_logs:
+    driver: local
+  consul_data:
+    driver: local
+  portainer_data:
+    driver: local
+
+# =============================================================
+# 🌐 NETWORKS
+# =============================================================
+networks:
+  aws_local_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
